@@ -1,0 +1,306 @@
+---
+title: "Spatial Analysis of Madrid Traffic Data with MetricGraph"
+author: "David Bolin and Alexandre Simas - INLA Workshop 2025"
+date: "May 2025"
+output:
+  pdf_document:
+    number_sections: true
+    fig_width: 8
+    fig_height: 6
+    highlight: tango
+  html_document:
+    theme: united
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.align = "center", out.width = "80%")
+```
+
+# Introduction
+
+This tutorial explores spatial analysis of traffic data on road networks using the `MetricGraph` package. We'll work with real traffic data from Madrid, Spain, and learn how to:
+
+1. Construct a metric graph from OpenStreetMap road network data
+2. Add observations to the graph
+3. Visualize traffic data on the network
+4. Fit spatial models to analyze traffic patterns
+
+The `MetricGraph` package provides tools for statistical analysis of data on network-structured domains, like road networks. It implements various types of Gaussian random fields on graphs and offers interfaces to INLA for Bayesian inference.
+
+Let's begin by loading the necessary packages:
+
+```{r load-packages}
+library(data.table)
+library(sf)
+library(osmdata)
+library(dplyr)
+library(MetricGraph)
+library(ggplot2)
+```
+
+# Data Description
+
+For this tutorial, we've prepared datasets containing traffic information for Madrid. The datasets include:
+
+1. Traffic sensor locations in Madrid
+2. Traffic measurements from these sensors during evening rush hour (6-7 PM) in March 2025
+
+These data have been generated based on typical traffic patterns and distributions for educational purposes.
+
+## Loading the Data
+
+For convenience, we've prepared data files containing:
+- The traffic sensor locations
+- The traffic measurements
+```
+
+Now we can load the pre-prepared data:
+
+```{r load-data}
+# Load the pre-prepared data files
+madrid_traffic_avg_sf <- readRDS("madrid_traffic_avg.rds")
+radar_locations_sf <- readRDS("radar_locations.rds")
+
+# Examine the data
+head(madrid_traffic_avg_sf)
+```
+
+# Madrid Road Network as a Metric Graph
+
+## Understanding the Study Area
+
+For this tutorial, we're focusing on a central area of Madrid defined by this bounding box:
+
+```{r define-bbox}
+# Define the Madrid bounding box used for this tutorial
+small_bbox <- c(-3.73, 40.40, -3.65, 40.45)  
+
+# Create a simple data frame for the bounding box to visualize it
+bbox_df <- data.frame(
+  lon = c(small_bbox[1], small_bbox[3], small_bbox[3], small_bbox[1], small_bbox[1]),
+  lat = c(small_bbox[2], small_bbox[2], small_bbox[4], small_bbox[4], small_bbox[2])
+)
+bbox_sf <- st_as_sf(bbox_df, coords = c("lon", "lat"), crs = 4326) %>%
+  st_combine() %>%
+  st_cast("POLYGON")
+```
+
+
+## Exercise 1: Exploring the Graph Structure
+
+Let us start by creating a graph from the OpenStreetMap data with some standard features.
+
+```{r create-graph-example, eval=FALSE}
+madrid_sf_filtered <- opq(bbox = small_bbox) %>%
+  add_osm_feature(key = "highway", 
+                  value = c("motorway", "trunk", "primary", "secondary")) %>%
+  osmdata_sf()
+
+madrid_graph_components <- graph_components$new(madrid_sf_filtered, perform_merges = TRUE, 
+tolerance = list(vertex_vertex = 0.001,
+vertex_edge = 0.01))
+
+madrid_graph <- madrid_graph_components$get_largest()
+```
+
+Let's explore the pre-loaded graph structure:
+
+```{r explore-graph}
+# Look at the graph structure
+print(madrid_graph)
+
+# What is the total length of the road network in the graph?
+cat("Total length of road network:", round(sum(madrid_graph$edge_lengths), 2), "km\n")
+
+# Compute additional characteristics
+madrid_graph$compute_characteristics()
+print(t(madrid_graph$characteristics))
+```
+
+## Visualizing the Graph
+
+Let's visualize our road network graph:
+
+```{r plot-graph}
+# Plot the graph
+p <- madrid_graph$plot(vertex_size = 0.5, edge_width = 0.5)
+print(p)
+```
+
+# Traffic Data on the Road Network
+
+## Examining Sensor Locations 
+
+Let's examine the traffic sensor locations in our study area:
+
+```{r examine-sensors}
+# How many sensors are in our study area?
+cat("Number of sensors in the study area:", nrow(radar_locations_sf), "\n")
+
+# Plot the graph with the sensor locations
+p <- madrid_graph$plot(vertex_size = 0, edge_width = 0.5)
+p + geom_sf(data = radar_locations_sf, color = "red", size = 1)
+```
+
+## Recreate the graph with more features
+
+Let us recreate the graph with more features.
+
+```{r recreate-graph}
+madrid_sf_new <- opq(bbox = small_bbox) %>%
+  add_osm_feature(key = "highway", 
+                  value = c("motorway", "trunk", "primary", "secondary", 
+                            "tertiary", "residential", "unclassified",
+                            "motorway_link", "trunk_link")) %>%
+  osmdata_sf()
+
+madrid_graph_components_new <- graph_components$new(madrid_sf_new, perform_merges = TRUE,tolerance = list(vertex_vertex = 0.001, vertex_edge = 0.01))
+
+madrid_graph_new <- madrid_graph_components_new$get_largest()
+```
+
+## Examining the new graph along with the data
+
+```{r examine-new-graph}
+# Plot the new graph with the sensor locations
+p <- madrid_graph_new$plot(vertex_size = 0, edge_width = 0.5)
+p + geom_sf(data = radar_locations_sf, color = "red", size = 1)
+```
+
+We can now add the data to the graph.
+
+```{r add-data-to-graph}
+madrid_graph_new$add_observations(madrid_traffic_avg_sf)
+```
+
+
+
+## Exercise 2: Checking Coordinate Reference Systems
+
+A crucial step in spatial analysis is ensuring that all data uses the same coordinate reference system (CRS):
+
+```{r check-crs}
+# Check the CRS of the radar locations
+st_crs(radar_locations_sf)
+
+# Check the CRS of the graph
+print(madrid_graph)
+```
+
+## Examining Traffic Data
+
+Now let's examine the pre-computed traffic measurements:
+
+```{r examine-traffic}
+# Basic statistics of the traffic data
+summary(madrid_traffic_avg_sf)
+
+# Histogram of traffic intensity
+hist(madrid_traffic_avg_sf$intensity, 
+     main = "Distribution of Traffic Intensity", 
+     xlab = "Intensity (vehicles per 15min)",
+     col = "lightblue")
+```
+
+# Visualizing Traffic Data on the Graph
+
+Let's check if the traffic data is already loaded into the graph:
+
+```{r check-graph-data}
+  madrid_graph_new$add_observations(madrid_traffic_avg_sf)
+  madrid_graph_new$add_observations(
+    madrid_graph_new$mutate(log_intensity = log(pmax(1, intensity))), 
+    clear_obs = TRUE
+  )
+  
+  # Plot the data
+  madrid_graph_new$plot(data = "log_intensity", 
+                   vertex_size = 0, 
+                   data_size = 2,
+                   edge_width = 0.5) +
+    scale_color_viridis_c(name = "Log Intensity")
+```
+
+# Exploratory Data Analysis
+
+Let's explore the relationships between different traffic metrics:
+
+```{r eda}
+# Get the data from the graph
+traffic_data <- madrid_graph_new$get_data()
+# Histogram of log intensity
+hist(traffic_data$log_intensity, 
+     main = "Histogram of Log Traffic Intensity", 
+     xlab = "Log Intensity", 
+     col = "lightblue", 
+     breaks = 20)
+```
+
+# Spatial Modeling
+
+Now let's fit a spatial model to the log intensity using a Whittle-Matérn random field with $\alpha = 1$, which corresponds to an exponential covariance model:
+
+```{r fit-model}
+# Fit the model
+fit_alpha1 <- graph_lme(log_intensity ~ 1, 
+                        graph = madrid_graph_new, 
+                        BC = 0,
+                        model = list(type = "WhittleMatern", alpha = 1))
+
+# Look at the model summary
+summary(fit_alpha1)
+```
+
+## Interpreting the Model Results
+
+The estimated parameters of the Whittle-Matérn model provide insights into the spatial correlation of traffic intensity:
+
+```{r interpret-model}
+# Extract parameters from the model
+summary(fit_alpha1)
+```
+
+- **Intercept**: The average log traffic intensity across the network
+- **Range**: The effective distance (in kilometers) at which spatial correlation becomes negligible
+- **Sigma**: The standard deviation of the spatial process, indicating the variability of traffic intensity
+- **Nugget**: The measurement error or micro-scale variation
+
+## Predicting on the Graph
+
+We can use our fitted model to make predictions at unobserved locations on the graph:
+
+```{r predictions}
+# Build a mesh on the graph for prediction (if not already done)
+if (length(madrid_graph_new$mesh$VtE) == 0) {
+  madrid_graph_new$build_mesh(h = 0.01)
+}
+
+# Create a data frame with the prediction locations
+# Extract mesh vertices as sf object
+mesh_vertices_df <- data.frame(
+  edge_number = madrid_graph_new$mesh$VtE[,1],
+  distance_on_edge = madrid_graph_new$mesh$VtE[,2]
+)
+
+# Make predictions
+pred <- predict(fit_alpha1, newdata = mesh_vertices_df,
+                normalize = TRUE)
+
+# Plot the predictions
+madrid_graph_new$plot_function(X = pred$mean, 
+                          vertex_size = 0, 
+                          edge_width = 0.5) +
+  scale_color_viridis_c(name = "Predicted\nLog Intensity")
+```
+
+# Exercise 3: Further analysis
+
+* Consider removing the zero values from the data.
+* Try pruning the graph.
+* Try fitting a model with smoothness parameter alpha = 2.
+* Try fitting the model estimating the smoothness parameter by using `rSPDE` interface.
+*  Try fitting the model with `INLA` interface.
+*  Try fitting the model with `inlabru` interface.
+*  Check the connected components of the graph and consider whether more features should be added to the graph, or if the tolerances should be changed.
