@@ -38,6 +38,7 @@ library(osmdata)
 library(dplyr)
 library(MetricGraph)
 library(ggplot2)
+library(inlabru)
 ```
 
 # Data Description
@@ -295,6 +296,45 @@ madrid_graph_new$plot_function(X = pred$mean,
   scale_color_viridis_c(name = "Predicted\nLog Intensity")
 ```
 
+## Fitting the model with `inlabru` interface
+
+Let us create the SPDE model object:
+
+```{r create-spde}
+spde_model <- graph_spde(madrid_graph_new, alpha = 1)
+```
+
+Now, let us create the data object:
+
+```{r create-data}
+data_spde <- graph_data_spde(spde_model, loc_name = "loc")
+```
+
+Let us now fit the model:
+
+```{r fit-model-inlabru, warning=FALSE}
+f.s <- log_intensity ~ Intercept(1) + 
+                    field(loc, model = spde_model)
+fit_alpha1_inlabru <- bru(f.s, 
+                    data = data_spde[["data"]])
+```
+
+Now, let us look at the model summary:
+
+```{r interpret-model-inlabru}
+summary(fit_alpha1_inlabru)
+```
+
+Now, let us see the estimated parameters:
+
+```{r interpret-model-inlabru-2}
+spde_result <- spde_metric_graph_result(fit_alpha1_inlabru, 
+                    "field", spde_model)
+
+summary(spde_result)
+```
+
+
 # Exercise 3: Further analysis
 
 * Consider removing the zero values from the data.
@@ -302,5 +342,4 @@ madrid_graph_new$plot_function(X = pred$mean,
 * Try fitting a model with smoothness parameter alpha = 2.
 * Try fitting the model estimating the smoothness parameter by using `rSPDE` interface.
 *  Try fitting the model with `INLA` interface.
-*  Try fitting the model with `inlabru` interface.
 *  Check the connected components of the graph and consider whether more features should be added to the graph, or if the tolerances should be changed.
